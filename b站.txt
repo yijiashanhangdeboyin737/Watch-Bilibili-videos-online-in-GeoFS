@@ -1,0 +1,964 @@
+// 创建B站播放器按钮
+const bilibiliBtn = document.createElement('div');
+bilibiliBtn.id = 'bilibili-player-btn';
+bilibiliBtn.innerHTML = '🎬';
+bilibiliBtn.style.cssText = `
+    position: fixed;
+    bottom: 150px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg, #00a1d6, #f25d8e);
+    border-radius: 50%;
+    border: 3px solid white;
+    color: white;
+    font-size: 30px;
+    cursor: pointer;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    transition: all 0.3s ease;
+    user-select: none;
+`;
+
+// 添加悬停效果
+bilibiliBtn.addEventListener('mouseenter', () => {
+    bilibiliBtn.style.transform = 'scale(1.1)';
+    bilibiliBtn.style.boxShadow = '0 8px 25px rgba(0,0,0,0.6)';
+});
+
+bilibiliBtn.addEventListener('mouseleave', () => {
+    bilibiliBtn.style.transform = 'scale(1)';
+    bilibiliBtn.style.boxShadow = '0 6px 20px rgba(0,0,0,0.5)';
+});
+
+// 解析B站视频ID的改进函数
+function extractBilibiliVideoId(input) {
+    // 处理BV号
+    let bvid = input.match(/BV[a-zA-Z0-9]{10}/i);
+    if (bvid) return { type: 'bvid', id: bvid[0] };
+    
+    // 处理av号
+    let avid = input.match(/(?:av|AV)(\d+)/i);
+    if (avid) return { type: 'avid', id: avid[1] };
+    
+    // 处理短链接
+    if (input.includes('b23.tv')) {
+        return { type: 'short', url: input };
+    }
+    
+    // 处理完整的URL
+    try {
+        const url = new URL(input);
+        const params = new URLSearchParams(url.search);
+        
+        if (params.has('bvid')) {
+            return { type: 'bvid', id: params.get('bvid') };
+        }
+        if (params.has('avid')) {
+            return { type: 'avid', id: params.get('avid') };
+        }
+        
+        // 从路径中提取
+        const pathMatch = url.pathname.match(/\/(BV[a-zA-Z0-9]{10})/i);
+        if (pathMatch) return { type: 'bvid', id: pathMatch[1] };
+    } catch (e) {
+        // 如果不是有效的URL，尝试直接使用输入
+        if (/^BV[a-zA-Z0-9]{10}$/i.test(input)) {
+            return { type: 'bvid', id: input };
+        }
+        if (/^av\d+$/i.test(input)) {
+            return { type: 'avid', id: input.replace(/^av/i, '') };
+        }
+    }
+    
+    return null;
+}
+
+// 从localStorage获取保存的窗口设置
+function getWindowSettings() {
+    const saved = localStorage.getItem('bilibili-player-settings');
+    if (saved) {
+        return JSON.parse(saved);
+    }
+    return {
+        width: 400,
+        height: 300,
+        left: window.innerWidth - 450,
+        top: 100,
+        alwaysOnTop: true,
+        remember: true
+    };
+}
+
+// 保存窗口设置到localStorage
+function saveWindowSettings(settings) {
+    localStorage.setItem('bilibili-player-settings', JSON.stringify(settings));
+}
+
+// 创建样式
+const style = document.createElement('style');
+style.textContent = `
+    #bilibili-prompt {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 25px;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        z-index: 100001;
+        min-width: 350px;
+        max-width: 450px;
+    }
+    
+    #bilibili-prompt h3 {
+        margin: 0 0 15px 0;
+        color: #333;
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .input-group {
+        margin-bottom: 15px;
+    }
+    
+    .input-group label {
+        display: block;
+        margin-bottom: 5px;
+        color: #555;
+        font-size: 14px;
+        font-weight: bold;
+    }
+    
+    .input-row {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .input-row .input-group {
+        flex: 1;
+    }
+    
+    #bilibili-input {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+        transition: border-color 0.3s;
+    }
+    
+    #bilibili-input:focus {
+        border-color: #00a1d6;
+        outline: none;
+    }
+    
+    .size-input {
+        width: 100%;
+        padding: 10px;
+        border: 2px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+        transition: border-color 0.3s;
+    }
+    
+    .size-input:focus {
+        border-color: #00a1d6;
+        outline: none;
+    }
+    
+    #bilibili-buttons {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        margin-top: 20px;
+    }
+    
+    .bilibili-btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: all 0.3s;
+        flex: 1;
+    }
+    
+    #bilibili-confirm {
+        background: linear-gradient(135deg, #00a1d6, #f25d8e);
+        color: white;
+    }
+    
+    #bilibili-cancel {
+        background: #f0f0f0;
+        color: #666;
+    }
+    
+    .bilibili-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    
+    #bilibili-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 100000;
+        backdrop-filter: blur(3px);
+    }
+    
+    #bilibili-examples {
+        font-size: 12px;
+        color: #666;
+        margin-top: 10px;
+        line-height: 1.4;
+        background: #f9f9f9;
+        padding: 10px;
+        border-radius: 6px;
+        border-left: 3px solid #00a1d6;
+    }
+    
+    .checkbox-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+    }
+    
+    .checkbox-group input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+    }
+    
+    .checkbox-group label {
+        margin: 0;
+        font-size: 14px;
+        color: #555;
+    }
+    
+    .preset-buttons {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-top: 5px;
+    }
+    
+    .preset-btn {
+        padding: 8px 4px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+        text-align: center;
+    }
+    
+    .preset-btn:hover {
+        background: #f0f0f0;
+    }
+    
+    .preset-btn.active {
+        background: #00a1d6;
+        color: white;
+        border-color: #00a1d6;
+    }
+    
+    .position-presets {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-top: 5px;
+    }
+    
+    .position-btn {
+        padding: 8px 4px;
+        border: 1px solid #ddd;
+        background: white;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+        text-align: center;
+    }
+    
+    .position-btn:hover {
+        background: #f0f0f0;
+    }
+    
+    .position-btn.active {
+        background: #f25d8e;
+        color: white;
+        border-color: #f25d8e;
+    }
+    
+    .icon {
+        font-size: 16px;
+    }
+    
+    .dimension-display {
+        font-size: 11px;
+        color: #888;
+        margin-top: 2px;
+    }
+    
+    /* 置顶播放器窗口样式 */
+    #bilibili-player-window {
+        position: fixed;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        z-index: 99999;
+        overflow: hidden;
+        resize: both;
+        min-width: 200px;
+        min-height: 150px;
+        border: 2px solid #00a1d6;
+        display: none;
+    }
+    
+    #bilibili-player-window.always-on-top {
+        z-index: 100000 !important;
+        border-color: #f25d8e;
+    }
+    
+    #bilibili-player-header {
+        background: linear-gradient(135deg, #00a1d6, #f25d8e);
+        color: white;
+        padding: 12px 15px;
+        cursor: move;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+    }
+    
+    #bilibili-player-title {
+        font-weight: bold;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    #bilibili-player-controls {
+        display: flex;
+        gap: 10px;
+    }
+    
+    .player-control-btn {
+        background: rgba(255,255,255,0.2);
+        border: none;
+        color: white;
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: all 0.2s;
+    }
+    
+    .player-control-btn:hover {
+        background: rgba(255,255,255,0.3);
+        transform: scale(1.1);
+    }
+    
+    #bilibili-player-content {
+        width: 100%;
+        height: calc(100% - 48px);
+        background: #000;
+    }
+    
+    #bilibili-player-iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: black;
+    }
+    
+    .window-resize-handle {
+        position: absolute;
+        background: transparent;
+        z-index: 10;
+    }
+    
+    .resize-n { top: 0; left: 10px; right: 10px; height: 5px; cursor: n-resize; }
+    .resize-e { top: 10px; right: 0; width: 5px; bottom: 10px; cursor: e-resize; }
+    .resize-s { bottom: 0; left: 10px; right: 10px; height: 5px; cursor: s-resize; }
+    .resize-w { top: 10px; left: 0; width: 5px; bottom: 10px; cursor: w-resize; }
+    .resize-ne { top: 0; right: 0; width: 10px; height: 10px; cursor: ne-resize; }
+    .resize-nw { top: 0; left: 0; width: 10px; height: 10px; cursor: nw-resize; }
+    .resize-se { bottom: 0; right: 0; width: 10px; height: 10px; cursor: se-resize; }
+    .resize-sw { bottom: 0; left: 0; width: 10px; height: 10px; cursor: sw-resize; }
+    
+    .player-control-btn.active {
+        background: rgba(255,255,255,0.4);
+        box-shadow: inset 0 0 5px rgba(0,0,0,0.3);
+    }
+    
+    #bilibili-player-btn.minimized {
+        bottom: 20px;
+        right: 20px;
+        width: 50px;
+        height: 50px;
+        font-size: 24px;
+    }
+`;
+
+document.head.appendChild(style);
+
+// 创建置顶播放器窗口
+const playerWindow = document.createElement('div');
+playerWindow.id = 'bilibili-player-window';
+
+playerWindow.innerHTML = `
+    <div id="bilibili-player-header">
+        <div id="bilibili-player-title">
+            <span>🎬 B站播放器</span>
+        </div>
+        <div id="bilibili-player-controls">
+            <button class="player-control-btn" id="player-minimize" title="最小化">➖</button>
+            <button class="player-control-btn" id="player-always-on-top" title="置顶">📌</button>
+            <button class="player-control-btn" id="player-close" title="关闭">✕</button>
+        </div>
+    </div>
+    <div id="bilibili-player-content">
+        <iframe id="bilibili-player-iframe" allowfullscreen></iframe>
+    </div>
+    <div class="window-resize-handle resize-n"></div>
+    <div class="window-resize-handle resize-e"></div>
+    <div class="window-resize-handle resize-s"></div>
+    <div class="window-resize-handle resize-w"></div>
+    <div class="window-resize-handle resize-ne"></div>
+    <div class="window-resize-handle resize-nw"></div>
+    <div class="window-resize-handle resize-se"></div>
+    <div class="window-resize-handle resize-sw"></div>
+`;
+
+document.body.appendChild(playerWindow);
+
+// 播放器窗口状态
+let playerState = {
+    isDragging: false,
+    isResizing: false,
+    resizeDirection: '',
+    startX: 0,
+    startY: 0,
+    startWidth: 0,
+    startHeight: 0,
+    startLeft: 0,
+    startTop: 0,
+    alwaysOnTop: true,
+    minimized: false
+};
+
+// 初始化播放器窗口
+function initPlayerWindow() {
+    const header = document.getElementById('bilibili-player-header');
+    const minimizeBtn = document.getElementById('player-minimize');
+    const alwaysOnTopBtn = document.getElementById('player-always-on-top');
+    const closeBtn = document.getElementById('player-close');
+    const resizeHandles = document.querySelectorAll('.window-resize-handle');
+    
+    // 置顶功能
+    alwaysOnTopBtn.addEventListener('click', function() {
+        playerState.alwaysOnTop = !playerState.alwaysOnTop;
+        if (playerState.alwaysOnTop) {
+            playerWindow.classList.add('always-on-top');
+            alwaysOnTopBtn.classList.add('active');
+            alwaysOnTopBtn.title = '取消置顶';
+        } else {
+            playerWindow.classList.remove('always-on-top');
+            alwaysOnTopBtn.classList.remove('active');
+            alwaysOnTopBtn.title = '置顶';
+        }
+    });
+    
+    // 关闭播放器
+    closeBtn.addEventListener('click', function() {
+        playerWindow.style.display = 'none';
+        // 清除iframe内容
+        const iframe = document.getElementById('bilibili-player-iframe');
+        iframe.src = 'about:blank';
+    });
+    
+    // 最小化功能
+    minimizeBtn.addEventListener('click', function() {
+        playerState.minimized = !playerState.minimized;
+        if (playerState.minimized) {
+            // 保存当前尺寸和位置
+            playerWindow.dataset.savedWidth = playerWindow.style.width;
+            playerWindow.dataset.savedHeight = playerWindow.style.height;
+            playerWindow.dataset.savedLeft = playerWindow.style.left;
+            playerWindow.dataset.savedTop = playerWindow.style.top;
+            
+            // 最小化到右下角
+            playerWindow.style.width = '60px';
+            playerWindow.style.height = '60px';
+            playerWindow.style.left = 'calc(100% - 80px)';
+            playerWindow.style.top = '20px';
+            playerWindow.style.resize = 'none';
+            
+            // 隐藏内容
+            document.getElementById('bilibili-player-content').style.display = 'none';
+            document.getElementById('bilibili-player-header').style.padding = '0';
+            document.getElementById('bilibili-player-title').style.display = 'none';
+            
+            minimizeBtn.innerHTML = '➕';
+            minimizeBtn.title = '恢复';
+        } else {
+            // 恢复之前的状态
+            playerWindow.style.width = playerWindow.dataset.savedWidth;
+            playerWindow.style.height = playerWindow.dataset.savedHeight;
+            playerWindow.style.left = playerWindow.dataset.savedLeft;
+            playerWindow.style.top = playerWindow.dataset.savedTop;
+            playerWindow.style.resize = 'both';
+            
+            // 显示内容
+            document.getElementById('bilibili-player-content').style.display = 'block';
+            document.getElementById('bilibili-player-header').style.padding = '12px 15px';
+            document.getElementById('bilibili-player-title').style.display = 'flex';
+            
+            minimizeBtn.innerHTML = '➖';
+            minimizeBtn.title = '最小化';
+        }
+    });
+    
+    // 拖动功能
+    header.addEventListener('mousedown', startDrag);
+    
+    // 调整大小功能
+    resizeHandles.forEach(handle => {
+        handle.addEventListener('mousedown', startResize);
+    });
+    
+    // 鼠标移动事件
+    document.addEventListener('mousemove', function(e) {
+        if (playerState.isDragging) {
+            const dx = e.clientX - playerState.startX;
+            const dy = e.clientY - playerState.startY;
+            
+            playerWindow.style.left = `${playerState.startLeft + dx}px`;
+            playerWindow.style.top = `${playerState.startTop + dy}px`;
+        }
+        
+        if (playerState.isResizing) {
+            const dx = e.clientX - playerState.startX;
+            const dy = e.clientY - playerState.startY;
+            
+            let newWidth = playerState.startWidth;
+            let newHeight = playerState.startHeight;
+            let newLeft = playerState.startLeft;
+            let newTop = playerState.startTop;
+            
+            switch(playerState.resizeDirection) {
+                case 'n':
+                    newHeight = Math.max(150, playerState.startHeight - dy);
+                    newTop = playerState.startTop + (playerState.startHeight - newHeight);
+                    break;
+                case 's':
+                    newHeight = Math.max(150, playerState.startHeight + dy);
+                    break;
+                case 'e':
+                    newWidth = Math.max(200, playerState.startWidth + dx);
+                    break;
+                case 'w':
+                    newWidth = Math.max(200, playerState.startWidth - dx);
+                    newLeft = playerState.startLeft + (playerState.startWidth - newWidth);
+                    break;
+                case 'ne':
+                    newHeight = Math.max(150, playerState.startHeight - dy);
+                    newWidth = Math.max(200, playerState.startWidth + dx);
+                    newTop = playerState.startTop + (playerState.startHeight - newHeight);
+                    break;
+                case 'nw':
+                    newHeight = Math.max(150, playerState.startHeight - dy);
+                    newWidth = Math.max(200, playerState.startWidth - dx);
+                    newTop = playerState.startTop + (playerState.startHeight - newHeight);
+                    newLeft = playerState.startLeft + (playerState.startWidth - newWidth);
+                    break;
+                case 'se':
+                    newHeight = Math.max(150, playerState.startHeight + dy);
+                    newWidth = Math.max(200, playerState.startWidth + dx);
+                    break;
+                case 'sw':
+                    newHeight = Math.max(150, playerState.startHeight + dy);
+                    newWidth = Math.max(200, playerState.startWidth - dx);
+                    newLeft = playerState.startLeft + (playerState.startWidth - newWidth);
+                    break;
+            }
+            
+            playerWindow.style.width = `${newWidth}px`;
+            playerWindow.style.height = `${newHeight}px`;
+            playerWindow.style.left = `${newLeft}px`;
+            playerWindow.style.top = `${newTop}px`;
+        }
+    });
+    
+    // 鼠标松开事件
+    document.addEventListener('mouseup', function() {
+        playerState.isDragging = false;
+        playerState.isResizing = false;
+    });
+    
+    // 初始化置顶按钮状态
+    alwaysOnTopBtn.classList.add('active');
+}
+
+// 开始拖动
+function startDrag(e) {
+    if (e.target.closest('.player-control-btn')) return;
+    
+    playerState.isDragging = true;
+    playerState.startX = e.clientX;
+    playerState.startY = e.clientY;
+    playerState.startLeft = parseInt(playerWindow.style.left) || 0;
+    playerState.startTop = parseInt(playerWindow.style.top) || 0;
+    
+    // 确保窗口在最前面
+    playerWindow.style.zIndex = playerState.alwaysOnTop ? '100000' : '99999';
+}
+
+// 开始调整大小
+function startResize(e) {
+    e.stopPropagation();
+    playerState.isResizing = true;
+    playerState.startX = e.clientX;
+    playerState.startY = e.clientY;
+    playerState.startWidth = playerWindow.offsetWidth;
+    playerState.startHeight = playerWindow.offsetHeight;
+    playerState.startLeft = parseInt(playerWindow.style.left) || 0;
+    playerState.startTop = parseInt(playerWindow.style.top) || 0;
+    playerState.resizeDirection = e.target.className.split(' ')[1].split('-')[1];
+}
+
+// 初始化播放器窗口
+initPlayerWindow();
+
+// 点击事件处理
+bilibiliBtn.onclick = function() {
+    // 获取保存的设置
+    const savedSettings = getWindowSettings();
+    
+    // 创建遮罩层
+    const overlay = document.createElement('div');
+    overlay.id = 'bilibili-overlay';
+    
+    // 创建输入框
+    const promptDiv = document.createElement('div');
+    promptDiv.id = 'bilibili-prompt';
+    promptDiv.innerHTML = `
+        <h3><span class="icon">🎬</span> B站视频播放器</h3>
+        
+        <div class="input-group">
+            <label for="bilibili-input">视频链接/BV号:</label>
+            <input type="text" id="bilibili-input" placeholder="https://www.bilibili.com/video/BV1GJ411x7h7/" autofocus>
+        </div>
+        
+        <div class="input-row">
+            <div class="input-group">
+                <label for="bilibili-width">宽度 (px):</label>
+                <input type="number" id="bilibili-width" class="size-input" value="${savedSettings.width}" min="200" max="1000" step="10">
+            </div>
+            <div class="input-group">
+                <label for="bilibili-height">高度 (px):</label>
+                <input type="number" id="bilibili-height" class="size-input" value="${savedSettings.height}" min="150" max="800" step="10">
+            </div>
+        </div>
+        
+        <div class="input-group">
+            <label>预设尺寸:</label>
+            <div class="preset-buttons">
+                <button class="preset-btn" data-width="200" data-height="150">
+                    微型
+                    <div class="dimension-display">200×150</div>
+                </button>
+                <button class="preset-btn" data-width="400" data-height="300">
+                    小窗
+                    <div class="dimension-display">400×300</div>
+                </button>
+                <button class="preset-btn" data-width="600" data-height="450">
+                    中窗
+                    <div class="dimension-display">600×450</div>
+                </button>
+                <button class="preset-btn" data-width="800" data-height="600">
+                    大窗
+                    <div class="dimension-display">800×600</div>
+                </button>
+            </div>
+        </div>
+        
+        <div class="input-row">
+            <div class="input-group">
+                <label for="bilibili-left">左边距 (px):</label>
+                <input type="number" id="bilibili-left" class="size-input" value="${savedSettings.left || ''}" placeholder="自动" min="0" step="10">
+            </div>
+            <div class="input-group">
+                <label for="bilibili-top">上边距 (px):</label>
+                <input type="number" id="bilibili-top" class="size-input" value="${savedSettings.top || ''}" placeholder="自动" min="0" step="10">
+            </div>
+        </div>
+        
+        <div class="input-group">
+            <label>预设位置:</label>
+            <div class="position-presets">
+                <button class="position-btn" data-position="top-right">右上角</button>
+                <button class="position-btn" data-position="bottom-right">右下角</button>
+                <button class="position-btn" data-position="bottom-left">左下角</button>
+                <button class="position-btn" data-position="top-left">左上角</button>
+            </div>
+        </div>
+        
+        <div class="checkbox-group">
+            <input type="checkbox" id="bilibili-always-on-top" ${savedSettings.alwaysOnTop ? 'checked' : ''}>
+            <label for="bilibili-always-on-top">始终置顶</label>
+        </div>
+        
+        <div class="checkbox-group">
+            <input type="checkbox" id="bilibili-remember" ${savedSettings.remember ? 'checked' : ''}>
+            <label for="bilibili-remember">记住窗口设置</label>
+        </div>
+        
+        <div id="bilibili-examples">
+            支持格式：<br>
+            • 完整链接: https://www.bilibili.com/video/BV1GJ411x7h7/<br>
+            • BV号: BV1GJ411x7h7<br>
+            • av号: av170001<br>
+            • 短链接: https://b23.tv/xxxx
+        </div>
+        
+        <div id="bilibili-buttons">
+            <button id="bilibili-cancel" class="bilibili-btn">取消</button>
+            <button id="bilibili-confirm" class="bilibili-btn">打开播放器</button>
+        </div>
+    `;
+    
+    // 添加到页面
+    overlay.appendChild(promptDiv);
+    document.body.appendChild(overlay);
+    
+    // 获取元素
+    const input = document.getElementById('bilibili-input');
+    const widthInput = document.getElementById('bilibili-width');
+    const heightInput = document.getElementById('bilibili-height');
+    const leftInput = document.getElementById('bilibili-left');
+    const topInput = document.getElementById('bilibili-top');
+    const alwaysOnTopCheckbox = document.getElementById('bilibili-always-on-top');
+    const rememberCheckbox = document.getElementById('bilibili-remember');
+    const confirmBtn = document.getElementById('bilibili-confirm');
+    const cancelBtn = document.getElementById('bilibili-cancel');
+    const presetButtons = document.querySelectorAll('.preset-btn');
+    const positionButtons = document.querySelectorAll('.position-btn');
+    
+    // 预设按钮点击事件
+    presetButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            // 移除所有active类
+            presetButtons.forEach(b => b.classList.remove('active'));
+            // 添加active类到当前按钮
+            this.classList.add('active');
+            
+            // 设置宽度和高度
+            widthInput.value = this.dataset.width;
+            heightInput.value = this.dataset.height;
+        });
+    });
+    
+    // 位置预设按钮点击事件
+    positionButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            // 移除所有active类
+            positionButtons.forEach(b => b.classList.remove('active'));
+            // 添加active类到当前按钮
+            this.classList.add('active');
+            
+            // 获取当前窗口尺寸
+            const width = parseInt(widthInput.value) || 400;
+            const height = parseInt(heightInput.value) || 300;
+            
+            // 根据选择的位置计算坐标
+            switch(this.dataset.position) {
+                case 'top-right':
+                    leftInput.value = window.innerWidth - width - 20;
+                    topInput.value = 20;
+                    break;
+                case 'bottom-right':
+                    leftInput.value = window.innerWidth - width - 20;
+                    topInput.value = window.innerHeight - height - 20;
+                    break;
+                case 'bottom-left':
+                    leftInput.value = 20;
+                    topInput.value = window.innerHeight - height - 20;
+                    break;
+                case 'top-left':
+                    leftInput.value = 20;
+                    topInput.value = 20;
+                    break;
+            }
+        });
+    });
+    
+    // 自动选择当前尺寸对应的预设按钮
+    function selectPresetButton() {
+        const width = parseInt(widthInput.value) || 400;
+        const height = parseInt(heightInput.value) || 300;
+        
+        presetButtons.forEach(b => {
+            if (parseInt(b.dataset.width) === width && parseInt(b.dataset.height) === height) {
+                b.classList.add('active');
+            } else {
+                b.classList.remove('active');
+            }
+        });
+    }
+    
+    // 监听尺寸输入变化
+    widthInput.addEventListener('input', selectPresetButton);
+    heightInput.addEventListener('input', selectPresetButton);
+    
+    // 初始选择预设按钮
+    selectPresetButton();
+    
+    // 确认按钮点击
+    confirmBtn.onclick = function() {
+        const url = input.value.trim();
+        if (url) {
+            const videoInfo = extractBilibiliVideoId(url);
+            
+            if (videoInfo) {
+                let playerUrl;
+                
+                if (videoInfo.type === 'bvid') {
+                    playerUrl = `https://player.bilibili.com/player.html?bvid=${videoInfo.id}&autoplay=1&high_quality=1&danmaku=0`;
+                } else if (videoInfo.type === 'avid') {
+                    playerUrl = `https://player.bilibili.com/player.html?aid=${videoInfo.id}&autoplay=1&high_quality=1&danmaku=0`;
+                } else {
+                    // 短链接直接打开原页面
+                    window.open(videoInfo.url, '_blank');
+                    removePrompt();
+                    return;
+                }
+                
+                // 获取窗口设置
+                const width = parseInt(widthInput.value) || 400;
+                const height = parseInt(heightInput.value) || 300;
+                let left = leftInput.value ? parseInt(leftInput.value) : null;
+                let top = topInput.value ? parseInt(topInput.value) : null;
+                const alwaysOnTop = alwaysOnTopCheckbox.checked;
+                const remember = rememberCheckbox.checked;
+                
+                // 如果没有设置位置，则放在右下角
+                if (left === null || top === null) {
+                    left = window.innerWidth - width - 20;
+                    top = window.innerHeight - height - 20;
+                }
+                
+                // 限制窗口在屏幕范围内
+                left = Math.max(0, Math.min(left, window.innerWidth - width));
+                top = Math.max(0, Math.min(top, window.innerHeight - height));
+                
+                // 设置播放器窗口
+                playerWindow.style.width = `${width}px`;
+                playerWindow.style.height = `${height}px`;
+                playerWindow.style.left = `${left}px`;
+                playerWindow.style.top = `${top}px`;
+                playerWindow.style.display = 'block';
+                
+                // 设置置顶状态
+                playerState.alwaysOnTop = alwaysOnTop;
+                if (alwaysOnTop) {
+                    playerWindow.classList.add('always-on-top');
+                    document.getElementById('player-always-on-top').classList.add('active');
+                } else {
+                    playerWindow.classList.remove('always-on-top');
+                    document.getElementById('player-always-on-top').classList.remove('active');
+                }
+                
+                // 加载视频
+                const iframe = document.getElementById('bilibili-player-iframe');
+                iframe.src = playerUrl;
+                
+                // 更新标题
+                const titleElement = document.getElementById('bilibili-player-title');
+                titleElement.innerHTML = `<span>🎬 ${videoInfo.id || 'B站播放器'}</span>`;
+                
+                // 保存设置
+                if (remember) {
+                    saveWindowSettings({
+                        width,
+                        height,
+                        left,
+                        top,
+                        alwaysOnTop,
+                        remember
+                    });
+                } else {
+                    // 清除保存的设置
+                    localStorage.removeItem('bilibili-player-settings');
+                }
+            } else {
+                alert('无法识别的B站视频链接！请检查格式是否正确。');
+                input.focus();
+                return;
+            }
+        } else {
+            alert('请输入B站视频链接或BV号！');
+            input.focus();
+            return;
+        }
+        removePrompt();
+    };
+    
+    // 取消按钮点击
+    cancelBtn.onclick = removePrompt;
+    
+    // 遮罩层点击关闭
+    overlay.onclick = function(e) {
+        if (e.target === overlay) {
+            removePrompt();
+        }
+    };
+    
+    // 回车键支持
+    input.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            confirmBtn.click();
+        }
+    });
+    
+    // 移除提示框函数
+    function removePrompt() {
+        if (document.body.contains(overlay)) {
+            document.body.removeChild(overlay);
+        }
+    }
+    
+    // 自动聚焦输入框
+    setTimeout(() => input.focus(), 100);
+};
+
+// 添加按钮到页面
+document.body.appendChild(bilibiliBtn);
+
+// 添加控制台提示
+console.log('🎬 B站播放器按钮已加载成功！');
+console.log('💡 支持格式: BV号、av号、完整链接、短链接');
+console.log('📌 支持置顶窗口、可拖拽、可调整大小');
+console.log('🎮 在当前页面内浮动播放，不会打开新窗口');
